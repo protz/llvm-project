@@ -109,6 +109,31 @@ namespace {
 
 } // namespace
 
+const ParsedAttrInfo &
+ParsedAttrInfo::get(std::string FullName,
+                    AttributeCommonInfo::Syntax SyntaxUsed) {
+  // This may be an attribute defined by a plugin. First instantiate
+  // all plugin attributes if we haven't already done so.
+  static llvm::ManagedStatic<std::list<std::unique_ptr<ParsedAttrInfo>>>
+      PluginAttrInstances;
+  if (PluginAttrInstances->empty())
+    for (auto It : ParsedAttrInfoRegistry::entries())
+      PluginAttrInstances->emplace_back(It.instantiate());
+
+  if (SyntaxUsed == AttributeCommonInfo::AS_ContextSensitiveKeyword)
+    SyntaxUsed = AttributeCommonInfo::AS_Keyword;
+
+  for (auto &Ptr : *PluginAttrInstances)
+    for (const auto &S : Ptr->Spellings)
+      if (S.Syntax == SyntaxUsed && S.NormalizedFullName == FullName)
+        return *Ptr;
+
+  // If we failed to find a match then return a default ParsedAttrInfo.
+  static const ParsedAttrInfo DefaultParsedAttrInfo(
+      AttributeCommonInfo::UnknownAttribute);
+  return DefaultParsedAttrInfo;
+}
+
 const ParsedAttrInfo &ParsedAttrInfo::get(const AttributeCommonInfo &A) {
   // If we have a ParsedAttrInfo for this ParsedAttr then return that.
   if ((size_t)A.getParsedKind() < llvm::array_lengthof(AttrInfoMap))
@@ -120,29 +145,8 @@ const ParsedAttrInfo &ParsedAttrInfo::get(const AttributeCommonInfo &A) {
   if (A.getParsedKind() == AttributeCommonInfo::IgnoredAttribute)
     return IgnoredParsedAttrInfo;
 
-  // Otherwise this may be an attribute defined by a plugin. First instantiate
-  // all plugin attributes if we haven't already done so.
-  static llvm::ManagedStatic<std::list<std::unique_ptr<ParsedAttrInfo>>>
-      PluginAttrInstances;
-  if (PluginAttrInstances->empty())
-    for (auto It : ParsedAttrInfoRegistry::entries())
-      PluginAttrInstances->emplace_back(It.instantiate());
-
   // Search for a ParsedAttrInfo whose name and syntax match.
-  std::string FullName = A.getNormalizedFullName();
-  AttributeCommonInfo::Syntax SyntaxUsed = A.getSyntax();
-  if (SyntaxUsed == AttributeCommonInfo::AS_ContextSensitiveKeyword)
-    SyntaxUsed = AttributeCommonInfo::AS_Keyword;
-
-  for (auto &Ptr : *PluginAttrInstances)
-    for (auto &S : Ptr->Spellings)
-      if (S.Syntax == SyntaxUsed && S.NormalizedFullName == FullName)
-        return *Ptr;
-
-  // If we failed to find a match then return a default ParsedAttrInfo.
-  static const ParsedAttrInfo DefaultParsedAttrInfo(
-      AttributeCommonInfo::UnknownAttribute);
-  return DefaultParsedAttrInfo;
+  return get(A.getNormalizedFullName(), A.getSyntax());
 }
 
 unsigned ParsedAttr::getMinArgs() const { return getInfo().NumArgs; }

@@ -4041,18 +4041,36 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
                                      ParsedAttributes &Attrs,
                                      SourceLocation *EndLoc,
                                      IdentifierInfo *ScopeName,
-                                     SourceLocation ScopeLoc) {
+                                     SourceLocation ScopeLoc, Declarator *D) {
   assert(Tok.is(tok::l_paren) && "Not a C++11 attribute argument list");
   SourceLocation LParenLoc = Tok.getLocation();
   const LangOptions &LO = getLangOpts();
   ParsedAttr::Syntax Syntax =
       LO.CPlusPlus ? ParsedAttr::AS_CXX11 : ParsedAttr::AS_C2x;
 
-  // If the attribute isn't known, we will not attempt to parse any
-  // arguments.
   if (!hasAttribute(LO.CPlusPlus ? AttrSyntax::CXX : AttrSyntax::C, ScopeName,
                     AttrName, getTargetInfo(), getLangOpts())) {
-    // Eat the left paren, then skip to the ending right paren.
+    std::string FullName;
+    FullName += ScopeName->getNameStart();
+    FullName += "::";
+    FullName += AttrName->getNameStart();
+    const ParsedAttrInfo &PluginInfo = ParsedAttrInfo::get(FullName, Syntax);
+    if (PluginInfo.AttrKind != AttributeCommonInfo::UnknownAttribute) {
+      // A plugin exists for this attribute. See if the plugin wants to opt into
+      // custom parsing.
+      ParsedAttrInfo::AttrHandling H = PluginInfo.parseAttributePayload(
+          this, Attrs, D, AttrName, AttrNameLoc, EndLoc, ScopeName, ScopeLoc);
+      if (H == ParsedAttrInfo::AttributeApplied)
+        return true;
+      else if (H == ParsedAttrInfo::AttributeNotApplied)
+        return false;
+      else
+        ; // fall-through
+    }
+
+    // Unknown attribute, or plugin declined to handle it. We do not attempt to
+    // parse its arguments. Eat the left paren, then skip to the ending right
+    // paren.
     ConsumeParen();
     SkipUntil(tok::r_paren);
     return false;
@@ -4126,7 +4144,8 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
 /// [C++11] attribute-namespace:
 ///         identifier
 void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
-                                          SourceLocation *endLoc) {
+                                          SourceLocation *endLoc,
+                                          Declarator *D) {
   if (Tok.is(tok::kw_alignas)) {
     Diag(Tok.getLocation(), diag::warn_cxx98_compat_alignas);
     ParseAlignmentSpecifier(attrs, endLoc);
@@ -4207,7 +4226,7 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
     // Parse attribute arguments
     if (Tok.is(tok::l_paren))
       AttrParsed = ParseCXX11AttributeArgs(AttrName, AttrLoc, attrs, endLoc,
-                                           ScopeName, ScopeLoc);
+                                           ScopeName, ScopeLoc, D);
 
     if (!AttrParsed)
       attrs.addNew(
@@ -4234,7 +4253,7 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
 /// attribute-specifier-seq:
 ///       attribute-specifier-seq[opt] attribute-specifier
 void Parser::ParseCXX11Attributes(ParsedAttributesWithRange &attrs,
-                                  SourceLocation *endLoc) {
+                                  SourceLocation *endLoc, Declarator *D) {
   assert(standardAttributesAllowed());
 
   SourceLocation StartLoc = Tok.getLocation(), Loc;
@@ -4242,7 +4261,7 @@ void Parser::ParseCXX11Attributes(ParsedAttributesWithRange &attrs,
     endLoc = &Loc;
 
   do {
-    ParseCXX11AttributeSpecifier(attrs, endLoc);
+    ParseCXX11AttributeSpecifier(attrs, endLoc, D);
   } while (isCXX11AttributeSpecifier());
 
   attrs.Range = SourceRange(StartLoc, *endLoc);

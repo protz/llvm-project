@@ -26,6 +26,7 @@
 #include "llvm/Frontend/OpenMP/OMPContext.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/Registry.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include <memory>
 #include <stack>
@@ -2658,7 +2659,7 @@ private:
     if (standardAttributesAllowed() && isCXX11AttributeSpecifier()) {
       ParsedAttributesWithRange attrs(AttrFactory);
       SourceLocation endLoc;
-      ParseCXX11Attributes(attrs, &endLoc);
+      ParseCXX11Attributes(attrs, &endLoc, &D);
       D.takeAttributes(attrs, endLoc);
     }
   }
@@ -2681,16 +2682,19 @@ private:
   }
 
   void ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
-                                    SourceLocation *EndLoc = nullptr);
+                                    SourceLocation *EndLoc = nullptr,
+                                    Declarator *D = nullptr);
   void ParseCXX11Attributes(ParsedAttributesWithRange &attrs,
-                            SourceLocation *EndLoc = nullptr);
+                            SourceLocation *EndLoc = nullptr,
+                            Declarator *D = nullptr);
   /// Parses a C++11 (or C2x)-style attribute argument list. Returns true
   /// if this results in adding an attribute to the ParsedAttributes list.
   bool ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
                                SourceLocation AttrNameLoc,
                                ParsedAttributes &Attrs, SourceLocation *EndLoc,
                                IdentifierInfo *ScopeName,
-                               SourceLocation ScopeLoc);
+                               SourceLocation ScopeLoc,
+                               Declarator *D = nullptr);
 
   IdentifierInfo *TryParseCXX11AttributeIdentifier(SourceLocation &Loc);
 

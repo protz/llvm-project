@@ -17,6 +17,7 @@
 #include "clang/Basic/AttrSubjectMatchRules.h"
 #include "clang/Basic/AttributeCommonInfo.h"
 #include "clang/Basic/Diagnostic.h"
+#include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/Ownership.h"
 #include "llvm/ADT/PointerUnion.h"
@@ -34,14 +35,18 @@ namespace clang {
 
 class ASTContext;
 class Decl;
+class Declarator;
 class Expr;
 class IdentifierInfo;
 class LangOptions;
 class ParsedAttr;
+class ParsedAttributes;
+class Parser;
 class Sema;
 class TargetInfo;
 
-struct ParsedAttrInfo {
+class ParsedAttrInfo {
+public:
   /// Corresponds to the Kind enum.
   unsigned AttrKind : 16;
   /// The number of required arguments of this attribute.
@@ -75,6 +80,27 @@ struct ParsedAttrInfo {
 
   virtual ~ParsedAttrInfo() = default;
 
+  enum AttrHandling { NotHandled, AttributeApplied, AttributeNotApplied };
+
+  /// Override the default parsing logic and perform parsing of the attribute
+  /// payload here. This is only meaningful for plugins that register new
+  /// attributes. Flags such as HasCustomParsing, NumArgs, OptArgs
+  /// are not honored, and the plugin has to do all of the validation by hand.
+  /// Plugin receives an possibly-null Declarator D that provides, if available,
+  /// information on the in-progress Decl that the attribute is attached to.
+  ///
+  /// NotHandled defers to default parsing (accept expression
+  /// arguments for GNU syntax, ignore arguments for CXX11 syntax);
+  /// AttributeNotApplied indicates a parsing failure and AttributeApplied a
+  /// success.
+  virtual AttrHandling
+  parseAttributePayload(Parser *P, ParsedAttributes &Attrs, Declarator *D,
+                        IdentifierInfo *AttrName, SourceLocation AttrNameLoc,
+                        SourceLocation *EndLoc, IdentifierInfo *ScopeName,
+                        SourceLocation ScopeLoc) const {
+    return NotHandled;
+  }
+
   /// Check if this attribute appertains to D, and issue a diagnostic if not.
   virtual bool diagAppertainsToDecl(Sema &S, const ParsedAttr &Attr,
                                     const Decl *D) const {
@@ -99,11 +125,6 @@ struct ParsedAttrInfo {
       llvm::SmallVectorImpl<std::pair<attr::SubjectMatchRule, bool>> &Rules,
       const LangOptions &LangOpts) const {
   }
-  enum AttrHandling {
-    NotHandled,
-    AttributeApplied,
-    AttributeNotApplied
-  };
   /// If this ParsedAttrInfo knows how to handle this ParsedAttr applied to this
   /// Decl then do so and return either AttributeApplied if it was applied or
   /// AttributeNotApplied if it wasn't. Otherwise return NotHandled.
@@ -112,6 +133,14 @@ struct ParsedAttrInfo {
     return NotHandled;
   }
 
+  /// Search amongst registered plugins for a ParsedAttrInfo whose name and
+  /// syntax match, and return a default value otherwise.
+  static const ParsedAttrInfo &get(std::string FullName,
+                                   AttributeCommonInfo::Syntax SyntaxUsed);
+
+  /// Once parsing has been performed, an AttributeCommonInfo (e.g. ParsedAttr)
+  /// most likely has a ParsedAttrInfo attached to it. Perform ParsedAttrInfo
+  /// resolution via A, falling back on get above otherwise.
   static const ParsedAttrInfo &get(const AttributeCommonInfo &A);
 };
 
